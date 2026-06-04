@@ -677,7 +677,9 @@
     .then(d => { render(d); addFeedLine(`Loaded ${(d.sessions||[]).length} sessions from Claude Code history`); })
     .catch(() => addFeedLine('Failed to load stats'));
 
-  connect();
+  // Skip the live SSE connection for screenshot/snapshot captures (?snapshot in URL)
+  // so headless browsers can reach an idle state and capture the page.
+  if (!location.search.includes('snapshot')) connect();
 
   setInterval(() => {
     if (lastData) document.getElementById('updated-at').textContent = 'updated ' + timeAgo(lastData.updatedAt);
