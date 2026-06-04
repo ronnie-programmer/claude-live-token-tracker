@@ -1,0 +1,13 @@
+# Dependencies (classmates run `npm install` to regenerate)
+node_modules/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
