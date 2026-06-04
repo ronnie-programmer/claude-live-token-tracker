@@ -13,6 +13,10 @@
       --text: #e2e8f0; --text-dim: #64748b; --text-muted: #334155;
       --green: #22d3a0; --orange: #f97316; --blue: #38bdf8; --purple: #a78bfa; --red: #f87171;
     }
+    body.light {
+      --bg: #f1f5f9; --surface: #ffffff; --surface2: #f8fafc; --border: #e2e8f0;
+      --text: #0f172a; --text-dim: #64748b; --text-muted: #94a3b8;
+    }
 
     body { font-family: 'SF Mono','Fira Code','Cascadia Code',monospace; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 13px; }
 
@@ -181,8 +185,47 @@
       <span id="updated-at">–</span>
       <span id="session-count">0 sessions</span>
     </div>
+    <button id="budget-btn" onclick="openBudgetModal()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);font-family:inherit;font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;">💰 Budget Alert</button>
+    <button id="compare-btn" onclick="openCompareModal()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);font-family:inherit;font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;">⚖️ Compare</button>
+    <button id="theme-btn" onclick="toggleTheme()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);font-family:inherit;font-size:14px;padding:5px 10px;border-radius:6px;cursor:pointer;">🌙</button>
   </div>
 </header>
+
+<!-- Budget Alert Modal -->
+<div id="budget-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:340px;font-family:inherit;">
+    <div style="font-size:14px;font-weight:700;margin-bottom:16px;">💰 Daily Budget Alert</div>
+    <label style="font-size:11px;color:var(--text-dim);">Alert me when daily spend exceeds ($)</label>
+    <input id="budget-input" type="number" min="0" step="0.5" placeholder="e.g. 5.00"
+      style="width:100%;margin-top:6px;margin-bottom:16px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:13px;">
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeBudgetModal()" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:inherit;font-size:12px;padding:6px 14px;border-radius:6px;cursor:pointer;">Cancel</button>
+      <button onclick="saveBudget()" style="background:var(--purple);border:none;color:#fff;font-family:inherit;font-size:12px;padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:600;">Save</button>
+    </div>
+    <div id="budget-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;text-align:center;"></div>
+  </div>
+</div>
+
+<!-- Session Compare Modal -->
+<div id="compare-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:680px;max-width:95vw;font-family:inherit;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="font-size:14px;font-weight:700;">⚖️ Compare Projects</div>
+      <button onclick="closeCompareModal()" style="background:transparent;border:none;color:var(--text-dim);font-size:18px;cursor:pointer;">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div>
+        <label style="font-size:11px;color:var(--text-dim);">Project A</label>
+        <select id="cmp-a" style="width:100%;margin-top:4px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:12px;"></select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text-dim);">Project B</label>
+        <select id="cmp-b" style="width:100%;margin-top:4px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:12px;"></select>
+      </div>
+    </div>
+    <div id="compare-result"></div>
+  </div>
+</div>
 
 <main>
   <!-- KPI cards -->
@@ -642,6 +685,7 @@
       flashEl('total-tokens'); flashEl('total-cost'); flashEl('burn-rate');
     }
     prevTotalTokens = totalTokens;
+    checkBudget(data);
   }
 
   // ── Controls wiring ────────────────────────────────────────────────────────────
@@ -703,6 +747,108 @@
     document.getElementById('updated-at').textContent = 'updated ' + timeAgo(lastData.updatedAt);
     renderBurn(lastData);
   }, 30_000);
+
+  // ── Dark / Light mode ────────────────────────────────────────────────────────
+  function toggleTheme() {
+    const light = document.body.classList.toggle('light');
+    localStorage.setItem('claudeTheme', light ? 'light' : 'dark');
+    document.getElementById('theme-btn').textContent = light ? '☀️' : '🌙';
+  }
+  (function initTheme() {
+    const saved = localStorage.getItem('claudeTheme');
+    if (saved === 'light') { document.body.classList.add('light'); document.getElementById('theme-btn').textContent = '☀️'; }
+  })();
+
+  // ── Budget Alert ─────────────────────────────────────────────────────────────
+  let budgetLimit = +localStorage.getItem('budgetLimit') || 0;
+  let budgetAlerted = false;
+
+  function openBudgetModal() {
+    document.getElementById('budget-input').value = budgetLimit || '';
+    const st = document.getElementById('budget-status');
+    st.textContent = budgetLimit ? `Current limit: $${budgetLimit.toFixed(2)}/day` : '';
+    document.getElementById('budget-modal').style.display = 'flex';
+  }
+  function closeBudgetModal() { document.getElementById('budget-modal').style.display = 'none'; }
+  function saveBudget() {
+    const v = parseFloat(document.getElementById('budget-input').value);
+    budgetLimit = isNaN(v) || v <= 0 ? 0 : v;
+    localStorage.setItem('budgetLimit', budgetLimit);
+    budgetAlerted = false;
+    document.getElementById('budget-status').textContent = budgetLimit ? `✓ Alert set for $${budgetLimit.toFixed(2)}/day` : 'Alert cleared';
+    setTimeout(closeBudgetModal, 800);
+  }
+
+  function checkBudget(data) {
+    if (!budgetLimit || budgetAlerted) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const todayCost = (data.daily || []).find(d => d.date === today)?.cost || 0;
+    if (todayCost >= budgetLimit) {
+      budgetAlerted = true;
+      if (Notification.permission === 'granted') {
+        new Notification('Claude Token Tracker', { body: `Daily spend hit $${todayCost.toFixed(2)} — over your $${budgetLimit.toFixed(2)} limit!`, icon: '' });
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(p => {
+          if (p === 'granted') new Notification('Claude Token Tracker', { body: `Daily spend hit $${todayCost.toFixed(2)} — over your $${budgetLimit.toFixed(2)} limit!` });
+        });
+      }
+      addFeedLine(`⚠️ Budget alert: daily spend $${todayCost.toFixed(2)} exceeded limit $${budgetLimit.toFixed(2)}`, true);
+    }
+  }
+
+  // ── Session Compare ──────────────────────────────────────────────────────────
+  function openCompareModal() {
+    if (!lastData) return;
+    const projects = (lastData.byProject || []).map(p => p.project);
+    ['cmp-a', 'cmp-b'].forEach((id, i) => {
+      const sel = document.getElementById(id);
+      sel.innerHTML = projects.map((p, j) => `<option value="${p}" ${j === i ? 'selected' : ''}>${p}</option>`).join('');
+    });
+    renderCompare();
+    document.getElementById('compare-modal').style.display = 'flex';
+    document.getElementById('cmp-a').onchange = renderCompare;
+    document.getElementById('cmp-b').onchange = renderCompare;
+  }
+  function closeCompareModal() { document.getElementById('compare-modal').style.display = 'none'; }
+
+  function renderCompare() {
+    const pA = document.getElementById('cmp-a').value;
+    const pB = document.getElementById('cmp-b').value;
+    const projects = lastData.byProject || [];
+    const a = projects.find(p => p.project === pA) || {};
+    const b = projects.find(p => p.project === pB) || {};
+
+    const row = (label, va, vb, fmtFn) => {
+      const aVal = va || 0, bVal = vb || 0;
+      const winner = aVal < bVal ? 'a' : aVal > bVal ? 'b' : '';
+      const badge = who => winner === who ? `<span style="color:var(--green);font-size:10px"> ✓</span>` : '';
+      return `<tr>
+        <td style="color:var(--text-dim);padding:8px 10px;font-size:12px">${label}</td>
+        <td style="padding:8px 10px;text-align:right;font-size:12px;color:${winner==='a'?'var(--green)':'var(--text)'}">${fmtFn(aVal)}${badge('a')}</td>
+        <td style="padding:8px 10px;text-align:right;font-size:12px;color:${winner==='b'?'var(--green)':'var(--text)'}">${fmtFn(bVal)}${badge('b')}</td>
+      </tr>`;
+    };
+
+    document.getElementById('compare-result').innerHTML = `
+      <table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:var(--surface2)">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim)">Metric</th>
+            <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--purple);font-weight:700">${pA}</th>
+            <th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--blue);font-weight:700">${pB}</th>
+          </tr>
+        </thead>
+        <tbody style="background:var(--surface)">
+          ${row('Sessions',     a.sessions,     b.sessions,     v => v)}
+          ${row('Output Tokens',a.outputTokens, b.outputTokens, fmt)}
+          ${row('Input Tokens', a.inputTokens,  b.inputTokens,  fmt)}
+          ${row('Total Cost',   a.totalCost,    b.totalCost,    fmtCost)}
+          ${row('Avg Cost/Session', a.sessions ? a.totalCost/a.sessions : 0, b.sessions ? b.totalCost/b.sessions : 0, fmtCost)}
+        </tbody>
+      </table>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:8px;text-align:right">✓ = lower is better</div>`;
+  }
+
 </script>
 </body>
 </html>

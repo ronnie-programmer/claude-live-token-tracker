@@ -374,6 +374,8 @@ app.get('/api/events', (req, res) => {
 });
 
 app.listen(PORT, async () => {
-  console.log(`Claude Token Tracker → http://localhost:${PORT}`);
+  const url = `http://localhost:${PORT}`;
+  console.log(`Claude Token Tracker → ${url}`);
   await refresh();
+  import('open').then(m => m.default(url)).catch(() => {});
 });
