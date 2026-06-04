@@ -550,7 +550,7 @@
   function render(data) {
     lastData = data;
     const t = data.totals || {};
-    const sessions = (data.sessions||[]).sort((a,b) => (b.lastSeen||'') > (a.lastSeen||'') ? 1 : -1);
+    const sessions = (data.sessions||[]).sort((a,b) => (b.lastSeen||'') > (a.lastSeen||'') ? 1 : (b.lastSeen||'') < (a.lastSeen||'') ? -1 : 0);
     const totalTokens = (t.inputTokens||0)+(t.outputTokens||0)+(t.cacheWriteTokens||0)+(t.cacheReadTokens||0);
 
     document.getElementById('total-tokens').textContent = fmt(totalTokens);
@@ -573,7 +573,7 @@
 
     // Tool table
     const byTool = data.byTool || [];
-    const maxToolCalls = Math.max(...byTool.map(t => t.count), 1);
+    const maxToolCalls = byTool.reduce((m, t) => t.count > m ? t.count : m, 1);
     document.getElementById('tool-table-body').innerHTML = byTool.length
       ? byTool.map(tl => `<tr>
           <td><span class="tool-tag">${tl.tool}</span></td>

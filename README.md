@@ -59,7 +59,26 @@ npm install
 npm start
 ```
 
-Open **http://localhost:3737** in your browser. The dashboard loads your existing history immediately and stays live from that point on.
+**4. Open your browser and go to:**
+
+> ### http://localhost:3737
+
+The dashboard loads your existing session history immediately and stays live from that point on.
+
+---
+
+## Troubleshooting
+
+**"Cannot GET /" or page won't load**
+- Make sure the server is still running in your terminal (`npm start`)
+- Confirm you're visiting `http://localhost:3737` — not `https://`
+
+**"No data / 0 sessions"**
+- You need [Claude Code](https://claude.ai/code) installed and used at least once so there's session data to read
+- Session files live at `~/.claude/projects/` — check that folder exists
+
+**Port already in use**
+- Another process is on port 3737. Stop it or change `const PORT = 3737` in `server.js` to a free port, then visit that port instead
 
 ---
 
