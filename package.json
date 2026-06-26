@@ -4,7 +4,8 @@
   "description": "Live token usage tracker for Claude Code sessions",
   "main": "server.js",
   "bin": {
-    "claude-token-tracker": "./bin/cli.js"
+    "claude-token-tracker": "./bin/cli.js",
+    "token-tracker": "./bin/terminal.js"
   },
   "scripts": {
     "start": "node server.js",
