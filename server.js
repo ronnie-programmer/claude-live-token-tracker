@@ -5,6 +5,8 @@ const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
 
+const TERMINAL_MODE = process.argv.includes('--terminal') || process.argv.includes('-t');
+
 const app = express();
 const PORT = 3737;
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
@@ -346,14 +348,6 @@ async function refresh() {
   }
 }
 
-chokidar.watch(PROJECTS_DIR, {
-  ignored: /[/\\]\./,
-  persistent: true,
-  ignoreInitial: true,
-  depth: 2,
-  usePolling: false,
-}).on('add', () => refresh()).on('change', () => refresh());
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/stats', async (req, res) => {
@@ -373,9 +367,172 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => clients.delete(res));
 });
 
-app.listen(PORT, async () => {
-  const url = `http://localhost:${PORT}`;
-  console.log(`Claude Token Tracker → ${url}`);
-  await refresh();
-  import('open').then(m => m.default(url)).catch(() => {});
-});
+// ── Terminal UI ──────────────────────────────────────────────────────────────
+
+const C = {
+  reset:   '\x1b[0m',
+  bold:    '\x1b[1m',
+  dim:     '\x1b[2m',
+  green:   '\x1b[32m',
+  cyan:    '\x1b[36m',
+  yellow:  '\x1b[33m',
+  magenta: '\x1b[35m',
+  blue:    '\x1b[34m',
+  white:   '\x1b[37m',
+  bgBlack: '\x1b[40m',
+  red:     '\x1b[31m',
+};
+
+function fmt$(n)   { return `${C.green}${C.bold}$${n.toFixed(4)}${C.reset}`; }
+function fmtM(n)   { return `${C.cyan}${(n / 1_000_000).toFixed(3)}M${C.reset}`; }
+function bar(val, max, width = 20) {
+  const filled = max > 0 ? Math.round((val / max) * width) : 0;
+  return C.green + '█'.repeat(filled) + C.dim + '░'.repeat(width - filled) + C.reset;
+}
+function pad(str, len) {
+  const plain = str.replace(/\x1b\[[0-9;]*m/g, '');
+  return str + ' '.repeat(Math.max(0, len - plain.length));
+}
+
+function renderTerminal(stats) {
+  const { totals, byProject, byModel, byTool, daily, sessions } = stats;
+  const cols = process.stdout.columns || 80;
+  const divider = C.dim + '─'.repeat(cols) + C.reset;
+
+  const lines = [];
+  const push = (...parts) => lines.push(parts.join(''));
+
+  // Header
+  push(C.bold + C.bgBlack + C.cyan, '  Claude Token Tracker  ', C.reset,
+       C.dim, '  live • ', new Date().toLocaleTimeString(), C.reset);
+  push(divider);
+
+  // Totals row
+  push(
+    C.bold, '  Total Cost: ', fmt$(totals.totalCost), '   ',
+    'Sessions: ', C.yellow, totals.sessionCount, C.reset, '   ',
+    'Messages: ', C.yellow, totals.messageCount, C.reset,
+  );
+  push(
+    '  Input: ', fmtM(totals.inputTokens), '  ',
+    'Output: ', fmtM(totals.outputTokens), '  ',
+    'Cache Read: ', fmtM(totals.cacheReadTokens),
+  );
+  push(divider);
+
+  // Projects
+  const topProjects = (byProject || []).slice(0, 8);
+  if (topProjects.length) {
+    const maxCost = topProjects[0].totalCost || 1;
+    push(C.bold + C.white, '  Projects', C.reset);
+    for (const p of topProjects) {
+      push(
+        '  ', pad(C.cyan + (p.project || 'unknown').slice(0, 30) + C.reset, 42),
+        bar(p.totalCost, maxCost, 16), '  ',
+        fmt$(p.totalCost), C.dim, `  (${p.sessions} sess)`, C.reset,
+      );
+    }
+    push(divider);
+  }
+
+  // Models
+  const topModels = (byModel || []).sort((a, b) => b.totalCost - a.totalCost).slice(0, 4);
+  if (topModels.length) {
+    push(C.bold + C.white, '  Models', C.reset);
+    for (const m of topModels) {
+      const label = (m.model || 'unknown').replace('claude-', '').slice(0, 28);
+      push(
+        '  ', pad(C.magenta + label + C.reset, 42),
+        fmt$(m.totalCost), C.dim, `  in:${(m.inputTokens/1e6).toFixed(2)}M  out:${(m.outputTokens/1e6).toFixed(2)}M`, C.reset,
+      );
+    }
+    push(divider);
+  }
+
+  // Top tools
+  const topTools = (byTool || []).slice(0, 6);
+  if (topTools.length) {
+    push(C.bold + C.white, '  Top Tools', C.reset);
+    const maxCount = topTools[0].count || 1;
+    for (const t of topTools) {
+      push(
+        '  ', pad(C.yellow + (t.tool || '?').slice(0, 22) + C.reset, 34),
+        bar(t.count, maxCount, 12), '  ',
+        C.dim, String(t.count).padStart(5), ' calls', C.reset,
+      );
+    }
+    push(divider);
+  }
+
+  // Recent daily costs (last 7 days)
+  const recentDays = (daily || []).slice(-7);
+  if (recentDays.length) {
+    push(C.bold + C.white, '  Daily (last 7 days)', C.reset);
+    const maxDay = Math.max(...recentDays.map(d => d.cost), 0.001);
+    for (const d of recentDays) {
+      push(
+        '  ', C.dim, d.date, C.reset, '  ',
+        bar(d.cost, maxDay, 18), '  ',
+        fmt$(d.cost), C.dim, `  ${d.messages} msgs`, C.reset,
+      );
+    }
+    push(divider);
+  }
+
+  push(C.dim, '  Press Ctrl+C to exit  •  Auto-refreshes on file change', C.reset);
+
+  return lines.join('\n');
+}
+
+function drawTerminal(stats) {
+  process.stdout.write('\x1b[2J\x1b[H'); // clear screen, cursor home
+  process.stdout.write(renderTerminal(stats) + '\n');
+}
+
+// ── Launch ───────────────────────────────────────────────────────────────────
+
+if (TERMINAL_MODE) {
+  async function termRefresh() {
+    if (isScanning) return;
+    isScanning = true;
+    try {
+      const scan = await scanAll();
+      lastStats = { ...aggregateStats(scan), updatedAt: new Date().toISOString() };
+      drawTerminal(lastStats);
+    } catch (err) {
+      process.stderr.write('Scan error: ' + err.message + '\n');
+    } finally {
+      isScanning = false;
+    }
+  }
+
+  chokidar.watch(PROJECTS_DIR, {
+    ignored: /[/\\]\./,
+    persistent: true,
+    ignoreInitial: true,
+    depth: 2,
+    usePolling: false,
+  }).on('add', termRefresh).on('change', termRefresh);
+
+  process.on('SIGINT', () => {
+    process.stdout.write('\x1b[?25h\n');
+    process.exit(0);
+  });
+
+  termRefresh();
+} else {
+  chokidar.watch(PROJECTS_DIR, {
+    ignored: /[/\\]\./,
+    persistent: true,
+    ignoreInitial: true,
+    depth: 2,
+    usePolling: false,
+  }).on('add', refresh).on('change', refresh);
+
+  app.listen(PORT, async () => {
+    const url = `http://localhost:${PORT}`;
+    console.log(`Claude Token Tracker → ${url}`);
+    await refresh();
+    import('open').then(m => m.default(url)).catch(() => {});
+  });
+}
